@@ -163,144 +163,6 @@ starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVer
 const stars = new THREE.Points(starsGeometry, starsMaterial);
 scene.add(stars);
 
-// Weather data storage and visualization
-const weatherPoints = [];
-const weatherGroup = new THREE.Group();
-scene.add(weatherGroup);
-
-// Weather point geometry and materials
-const weatherGeometry = new THREE.SphereGeometry(0.08, 12, 12);
-const weatherMaterials = {
-    clear: new THREE.MeshBasicMaterial({ 
-        color: 0xffdd00, 
-        emissive: 0xffaa00, 
-        emissiveIntensity: 0.4,
-        transparent: true,
-        opacity: 0.9
-    }),
-    cloudy: new THREE.MeshBasicMaterial({ 
-        color: 0xaaaaaa, 
-        emissive: 0x666666, 
-        emissiveIntensity: 0.3,
-        transparent: true,
-        opacity: 0.8
-    }),
-    rainy: new THREE.MeshBasicMaterial({ 
-        color: 0x3366ff, 
-        emissive: 0x1144cc, 
-        emissiveIntensity: 0.5,
-        transparent: true,
-        opacity: 0.9
-    }),
-    snowy: new THREE.MeshBasicMaterial({ 
-        color: 0xffffff, 
-        emissive: 0xdddddd, 
-        emissiveIntensity: 0.4,
-        transparent: true,
-        opacity: 0.9
-    }),
-    thunderstorm: new THREE.MeshBasicMaterial({ 
-        color: 0xff3300, 
-        emissive: 0xff1100, 
-        emissiveIntensity: 0.6,
-        transparent: true,
-        opacity: 0.95
-    })
-};
-
-// Function to convert lat/lon to 3D position on sphere
-function latLonToVector3(lat, lon, radius = 5.02) {
-    const phi = (90 - lat) * (Math.PI / 180);
-    const theta = (lon + 180) * (Math.PI / 180);
-    
-    const x = -radius * Math.sin(phi) * Math.cos(theta);
-    const z = radius * Math.sin(phi) * Math.sin(theta);
-    const y = radius * Math.cos(phi);
-    
-    return new THREE.Vector3(x, y, z);
-}
-
-// Function to determine weather condition from WMO code
-function getWeatherCondition(wmoCode) {
-    if (wmoCode <= 3) return 'clear';
-    if (wmoCode <= 48) return 'cloudy';
-    if (wmoCode <= 67 || (wmoCode >= 80 && wmoCode <= 82)) return 'rainy';
-    if (wmoCode <= 77 || (wmoCode >= 85 && wmoCode <= 86)) return 'snowy';
-    if (wmoCode >= 95) return 'thunderstorm';
-    return 'cloudy';
-}
-
-// Function to fetch weather data from Open-Meteo
-async function fetchWeatherData() {
-    const locations = [
-        // Major cities worldwide
-        { lat: 40.7128, lon: -74.0060, name: "New York" },
-        { lat: 51.5074, lon: -0.1278, name: "London" },
-        { lat: 48.8566, lon: 2.3522, name: "Paris" },
-        { lat: 35.6762, lon: 139.6503, name: "Tokyo" },
-        { lat: -33.8688, lon: 151.2093, name: "Sydney" },
-        { lat: 55.7558, lon: 37.6176, name: "Moscow" },
-        { lat: 39.9042, lon: 116.4074, name: "Beijing" },
-        { lat: 19.4326, lon: -99.1332, name: "Mexico City" },
-        { lat: -34.6037, lon: -58.3816, name: "Buenos Aires" },
-        { lat: 30.0444, lon: 31.2357, name: "Cairo" },
-        { lat: 28.6139, lon: 77.2090, name: "Delhi" },
-        { lat: 1.3521, lon: 103.8198, name: "Singapore" },
-        { lat: -26.2041, lon: 28.0473, name: "Johannesburg" },
-        { lat: 59.3293, lon: 18.0686, name: "Stockholm" },
-        { lat: -22.9068, lon: -43.1729, name: "Rio de Janeiro" },
-        { lat: 25.2048, lon: 55.2708, name: "Dubai" },
-        { lat: 37.7749, lon: -122.4194, name: "San Francisco" },
-        { lat: 52.5200, lon: 13.4050, name: "Berlin" },
-        { lat: 41.9028, lon: 12.4964, name: "Rome" },
-        { lat: 64.1466, lon: -21.9426, name: "Reykjavik" },
-        // Additional grid points for better coverage
-        { lat: 60, lon: 0 }, { lat: 60, lon: 60 }, { lat: 60, lon: 120 }, { lat: 60, lon: -120 }, { lat: 60, lon: -60 },
-        { lat: 30, lon: 0 }, { lat: 30, lon: 60 }, { lat: 30, lon: 120 }, { lat: 30, lon: -120 }, { lat: 30, lon: -60 },
-        { lat: 0, lon: 0 }, { lat: 0, lon: 60 }, { lat: 0, lon: 120 }, { lat: 0, lon: -120 }, { lat: 0, lon: -60 },
-        { lat: -30, lon: 0 }, { lat: -30, lon: 60 }, { lat: -30, lon: 120 }, { lat: -30, lon: -120 }, { lat: -30, lon: -60 },
-        { lat: -60, lon: 0 }, { lat: -60, lon: 60 }, { lat: -60, lon: 120 }, { lat: -60, lon: -120 }, { lat: -60, lon: -60 }
-    ];
-    
-    console.log('Fetching weather data for', locations.length, 'locations...');
-    
-    for (const location of locations) {
-        try {
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.lat}&longitude=${location.lon}&current=temperature_2m,weather_code&timezone=auto`;
-            const response = await fetch(url);
-            const data = await response.json();
-            
-            if (data.current) {
-                const condition = getWeatherCondition(data.current.weather_code);
-                const temperature = data.current.temperature_2m;
-                
-                // Create weather point
-                const material = weatherMaterials[condition].clone();
-                const weatherPoint = new THREE.Mesh(weatherGeometry, material);
-                
-                // Position on globe surface
-                const position = latLonToVector3(location.lat, location.lon);
-                weatherPoint.position.copy(position);
-                
-                // Store weather data
-                weatherPoint.userData = {
-                    condition,
-                    temperature,
-                    location: location.name || `${location.lat.toFixed(1)}°, ${location.lon.toFixed(1)}°`,
-                    wmoCode: data.current.weather_code
-                };
-                
-                weatherGroup.add(weatherPoint);
-                weatherPoints.push(weatherPoint);
-            }
-        } catch (error) {
-            console.warn('Failed to fetch weather for', location, error);
-        }
-    }
-    
-    console.log('Weather data loaded for', weatherPoints.length, 'locations');
-}
-
 camera.position.z = 15;
 
 // Handle window resize
@@ -313,58 +175,6 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize);
 
-// Raycaster for weather point interaction
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
-
-// Create tooltip element
-const tooltip = document.createElement('div');
-tooltip.style.position = 'absolute';
-tooltip.style.padding = '10px';
-tooltip.style.background = 'rgba(0, 0, 0, 0.8)';
-tooltip.style.color = 'white';
-tooltip.style.borderRadius = '5px';
-tooltip.style.pointerEvents = 'none';
-tooltip.style.display = 'none';
-tooltip.style.fontSize = '12px';
-tooltip.style.zIndex = '1000';
-document.body.appendChild(tooltip);
-
-// Mouse move handler for tooltips
-function onMouseMove(event) {
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(weatherPoints);
-    
-    if (intersects.length > 0) {
-        const point = intersects[0].object;
-        const data = point.userData;
-        
-        tooltip.style.display = 'block';
-        tooltip.style.left = event.clientX + 10 + 'px';
-        tooltip.style.top = event.clientY - 10 + 'px';
-        tooltip.innerHTML = `
-            <strong>${data.location}</strong><br>
-            Weather: ${data.condition}<br>
-            Temperature: ${data.temperature}°C<br>
-            WMO Code: ${data.wmoCode}
-        `;
-        
-        // Highlight the point
-        point.scale.set(1.5, 1.5, 1.5);
-    } else {
-        tooltip.style.display = 'none';
-        // Reset all point scales
-        weatherPoints.forEach(point => {
-            point.scale.set(1, 1, 1);
-        });
-    }
-}
-
-window.addEventListener('mousemove', onMouseMove);
-
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
@@ -373,18 +183,27 @@ function animate() {
     globe.rotation.y += 0.001;
     atmosphere.rotation.y += 0.001;
     
-    // Rotate weather points with globe
-    weatherGroup.rotation.y += 0.001;
-    
     // Subtle star movement
     stars.rotation.y += 0.0001;
     
-    // Rotate the sun direction to create day/night cycle
-    const time = Date.now() * 0.0001;
+    // Calculate real-time sun position based on current UTC time
+    const now = new Date();
+    const utcHours = now.getUTCHours();
+    const utcMinutes = now.getUTCMinutes();
+    const utcSeconds = now.getUTCSeconds();
+    
+    // Convert current UTC time to fraction of day (0-1)
+    const timeOfDay = (utcHours + utcMinutes/60 + utcSeconds/3600) / 24;
+    
+    // Calculate sun angle (0° at noon UTC, 180° at midnight UTC)
+    // The sun is at longitude 0° (Greenwich) at noon UTC
+    const sunAngle = (timeOfDay * 2 * Math.PI) - Math.PI; // -π to π
+    
+    // Set sun direction (X-axis represents longitude 0°)
     sphereMaterial.uniforms.sunDirection.value.set(
-        Math.cos(time),
-        0,
-        Math.sin(time)
+        Math.cos(sunAngle), // East-West position
+        0,                  // No north-south (simplified)
+        Math.sin(sunAngle)  // Z-component
     );
     
     controls.update();
@@ -392,8 +211,4 @@ function animate() {
     // Use composer instead of renderer for bloom effect
     composer.render();
 }
-
-// Initialize weather data
-fetchWeatherData().catch(console.error);
-
 animate();
