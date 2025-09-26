@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thumbtack 3D Model Resources</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        .resource { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        code { background: #e0e0e0; padding: 2px 5px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>🎯 Getting a Photorealistic Thumbtack Model</h1>
+    
+    <h2>Option 1: Free Model Websites</h2>
+    <div class="resource">
+        <h3>Sketchfab (Free Models)</h3>
+        <p>Search for "thumbtack" or "pushpin" with "Downloadable" filter</p>
+        <p><strong>URL:</strong> <a href="https://sketchfab.com/3d-models?features=downloadable&q=thumbtack&sort_by=-likeCount" target="_blank">sketchfab.com/3d-models</a></p>
+        <p><strong>Format:</strong> Download as GLB format</p>
+    </div>
+    
+    <div class="resource">
+        <h3>Poly Haven</h3>
+        <p>High-quality CC0 3D models</p>
+        <p><strong>URL:</strong> <a href="https://polyhaven.com/models" target="_blank">polyhaven.com/models</a></p>
+    </div>
+    
+    <div class="resource">
+        <h3>Turbosquid (Free Section)</h3>
+        <p>Filter by "Free" and search "thumbtack"</p>
+        <p><strong>URL:</strong> <a href="https://www.turbosquid.com/Search/3D-Models/free/thumbtack" target="_blank">turbosquid.com</a></p>
+    </div>
+    
+    <h2>Option 2: AI-Generated Models</h2>
+    <div class="resource">
+        <h3>Meshy AI</h3>
+        <p>Generate 3D models from text prompts</p>
+        <p><strong>Prompt:</strong> "Red thumbtack pushpin with metal needle, photorealistic, clean"</p>
+        <p><strong>URL:</strong> <a href="https://www.meshy.ai/" target="_blank">meshy.ai</a></p>
+    </div>
+    
+    <div class="resource">
+        <h3>Spline AI</h3>
+        <p>Generate and edit 3D models with AI</p>
+        <p><strong>URL:</strong> <a href="https://spline.design/" target="_blank">spline.design</a></p>
+    </div>
+    
+    <h2>Option 3: Quick DIY with Blender</h2>
+    <div class="resource">
+        <h3>5-Minute Thumbtack in Blender</h3>
+        <ol>
+            <li>Add Cylinder for head → Scale down Z-axis</li>
+            <li>Add Cone for pin → Scale and position</li>
+            <li>Add materials (red plastic + metal)</li>
+            <li>Export as GLB format</li>
+        </ol>
+        <p><strong>Download:</strong> <a href="https://www.blender.org/" target="_blank">blender.org</a> (Free)</p>
+    </div>
+    
+    <h2>How to Use the Model</h2>
+    <div class="resource">
+        <h3>Steps:</h3>
+        <ol>
+            <li>Download a thumbtack model in GLB/GLTF format</li>
+            <li>Place it in your project folder: <code>assets/thumbtack.glb</code></li>
+            <li>Update the model URL in your code:</li>
+        </ol>
+        <pre><code>const modelUrl = 'assets/thumbtack.glb';</code></pre>
+        
+        <h3>Alternative: Use a CDN</h3>
+        <p>Upload to a free CDN like GitHub Pages, Netlify, or use a direct link:</p>
+        <pre><code>const modelUrl = 'https://your-cdn.com/thumbtack.glb';</code></pre>
+    </div>
+    
+    <h2>Current Status</h2>
+    <div class="resource">
+        <p>✅ <strong>GLTF Loader is ready</strong> in your code</p>
+        <p>✅ <strong>Fallback system</strong> using procedural geometry with realistic materials</p>
+        <p>🎯 <strong>Next step:</strong> Get a thumbtack GLB file and update the model URL</p>
+    </div>
+    
+    <h2>Recommended Quick Solution</h2>
+    <div class="resource" style="background: #e8f5e8; border: 2px solid #4CAF50;">
+        <h3>🚀 Fastest Option</h3>
+        <p>1. Go to <a href="https://sketchfab.com/3d-models?features=downloadable&q=thumbtack&sort_by=-likeCount" target="_blank">Sketchfab</a></p>
+        <p>2. Find a free thumbtack model</p>
+        <p>3. Download as GLB</p>
+        <p>4. Put in your assets folder</p>
+        <p>5. Update the modelUrl in globe_new.js</p>
+    </div>
+</body>
+</html>

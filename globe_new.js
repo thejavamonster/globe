@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import tz from 'https://cdn.skypack.dev/tz-lookup';
 
 // Load country data
@@ -141,15 +142,131 @@ const sphereMaterial = new THREE.ShaderMaterial({
 });
 
 const globe = new THREE.Mesh(sphereGeometry, sphereMaterial);
+globe.receiveShadow = true; // Enable shadow receiving for realistic thumbtack shadows
 scene.add(globe);
 
-// Add click marker for debugging
-const markerGeometry = new THREE.SphereGeometry(0.05, 16, 16);
-const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-const clickMarker = new THREE.Mesh(markerGeometry, markerMaterial);
-clickMarker.visible = false;
-clickMarker.raycast = () => {}; // Disable raycasting on click marker
-scene.add(clickMarker);
+// Photorealistic thumbtack using 3D model
+let clickMarker = null;
+
+// Create GLTF loader for 3D models
+const gltfLoader = new GLTFLoader();
+
+// Create fallback thumbtack (in case model loading fails)
+function createFallbackThumbtack() {
+    const thumbtackGroup = new THREE.Group();
+    
+    // Ultra-realistic procedural thumbtack as fallback
+    const headGeometry = new THREE.CylinderGeometry(0.045, 0.055, 0.025, 32);
+    const headMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0xff1a1a,
+        metalness: 0.1,
+        roughness: 0.3,
+        clearcoat: 0.8,
+        clearcoatRoughness: 0.1,
+        envMapIntensity: 1.0
+    });
+    const head = new THREE.Mesh(headGeometry, headMaterial);
+    head.position.set(0, 0.04, 0);
+    
+    // Metal pin with realistic taper
+    const pinGeometry = new THREE.ConeGeometry(0.006, 0.1, 16);
+    const pinMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0xc0c0c0,
+        metalness: 0.9,
+        roughness: 0.1,
+        envMapIntensity: 1.5
+    });
+    const pin = new THREE.Mesh(pinGeometry, pinMaterial);
+    pin.position.set(0, -0.03, 0);
+    
+    thumbtackGroup.add(head);
+    thumbtackGroup.add(pin);
+    thumbtackGroup.scale.set(1.5, 1.5, 1.5);
+    
+    return thumbtackGroup;
+}
+
+// Try to load a 3D thumbtack model, fallback to procedural if not available
+function loadThumbtackModel() {
+    // Try to load from a free 3D model URL (you can replace this with your own model)
+    const modelUrl = 'https://threejs.org/examples/models/gltf/DamagedHelmet/DamagedHelmet.gltf';
+    
+    gltfLoader.load(
+        // Load the GLTF file from the extracted folder
+        'gltf/scene.gltf',
+        
+        // Success callback
+        (gltf) => {
+            console.log('Thumbtack model loaded successfully');
+            clickMarker = gltf.scene;
+            
+            // Scale down the model dramatically (Paper Mario models are usually very large)
+            clickMarker.scale.set(0.005, 0.005, 0.005); // Even smaller for better proportion
+            
+            // Convert materials to Basic materials to avoid lighting issues while preserving colors
+            console.log('Model structure:');
+            clickMarker.traverse((child) => {
+                if (child.isMesh) {
+                    console.log('Mesh found:', child.name, 'Original material:', child.material);
+                    
+                    // Extract original color/texture and convert to MeshBasicMaterial
+                    let originalColor = 0xffffff; // default white
+                    let originalMap = null;
+                    
+                    if (child.material) {
+                        // Try to get original color
+                        if (child.material.color) {
+                            originalColor = child.material.color.getHex();
+                        }
+                        // Try to get original texture map
+                        if (child.material.map) {
+                            originalMap = child.material.map;
+                        }
+                    }
+                    
+                    console.log('Extracted color:', originalColor.toString(16), 'Map:', originalMap);
+                    
+                    // Create new MeshStandardMaterial with original properties for realistic lighting
+                    child.material = new THREE.MeshStandardMaterial({
+                        color: originalColor,
+                        map: originalMap,
+                        roughness: 0.4,
+                        metalness: 0.2
+                    });
+                    
+                    console.log('Applied MeshBasicMaterial to:', child.name);
+                    
+                    // Enable shadows
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+            
+            clickMarker.visible = false;
+            clickMarker.raycast = () => {}; // Disable raycasting
+            scene.add(clickMarker);
+            
+            console.log('Thumbtack model configured - check console for material details');
+        },
+        
+        // Progress callback
+        (progress) => {
+            console.log('Loading thumbtack model...', (progress.loaded / progress.total * 100) + '%');
+        },
+        
+        // Error callback - use fallback
+        (error) => {
+            console.log('Could not load thumbtack model, using fallback:', error);
+            clickMarker = createFallbackThumbtack();
+            clickMarker.visible = false;
+            clickMarker.raycast = () => {}; // Disable raycasting
+            scene.add(clickMarker);
+        }
+    );
+}
+
+// Initialize thumbtack (will try model first, then fallback)
+loadThumbtackModel();
 
 // Add atmospheric glow - High resolution
 const atmosphereGeometry = new THREE.SphereGeometry(5.1, 128, 128);
@@ -168,9 +285,19 @@ scene.add(atmosphere);
 // Country outline object for highlighting selected countries
 let countryOutline = null;
 
-// Minimal lighting (no directional sun light)
-const ambientLight = new THREE.AmbientLight(0x404040, 0.3); // Very low ambient
+// Enhanced lighting for realistic shadows
+const ambientLight = new THREE.AmbientLight(0x404040, 0.4); // Slightly brighter ambient
 scene.add(ambientLight);
+
+// Add directional light for shadows and proper illumination
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+directionalLight.position.set(10, 10, 5);
+directionalLight.castShadow = true;
+directionalLight.shadow.mapSize.width = 2048;
+directionalLight.shadow.mapSize.height = 2048;
+directionalLight.shadow.camera.near = 0.5;
+directionalLight.shadow.camera.far = 50;
+scene.add(directionalLight);
 
 // Add stars
 const starsGeometry = new THREE.BufferGeometry();
@@ -327,8 +454,42 @@ function onMouseClick(event) {
         
         // Place visual marker at click location
         clickMarker.position.copy(point3D);
-        clickMarker.position.normalize().multiplyScalar(5.02); // Slightly above surface
+        clickMarker.position.normalize().multiplyScalar(4.95); // Stick slightly into surface (globe radius is 5.0)
+        
+        // Remove previous thumbtack light if it exists
+        if (clickMarker.userData.light) {
+            scene.remove(clickMarker.userData.light);
+        }
+        
+        // Add point light to illuminate the thumbtack
+        const thumbtackLight = new THREE.PointLight(0xffffff, 0.8, 30);
+        thumbtackLight.position.copy(clickMarker.position);
+        thumbtackLight.position.normalize().multiplyScalar(8); // Position light away from globe
+        scene.add(thumbtackLight);
+        clickMarker.userData.light = thumbtackLight;
+        
+        // Reset rotation first
+        clickMarker.rotation.set(0, 0, 0);
+        
+        // Calculate the direction from surface point to globe center (inward normal)
+        const surfaceNormal = clickMarker.position.clone().normalize();
+        const inwardDirection = surfaceNormal.clone().negate(); // Point toward center
+        
+        // Create a rotation matrix to orient the thumbtack
+        // Assuming the model's default orientation has the pin pointing along positive Y axis
+        const up = new THREE.Vector3(0, 1, 0); // Model's default pin direction
+        const quaternion = new THREE.Quaternion();
+        quaternion.setFromUnitVectors(up, inwardDirection);
+        clickMarker.setRotationFromQuaternion(quaternion);
+        
+        // Fine-tune rotation if the model is still not oriented correctly
+        // You may need to adjust these based on your specific model's orientation
+        clickMarker.rotateX(Math.PI); // Flip 180 degrees if pin points wrong way
+        
         clickMarker.visible = true;
+        
+        console.log('Thumbtack positioned at:', clickMarker.position);
+        console.log('Thumbtack rotation:', clickMarker.rotation);
         
         // Find country using GeoJSON data
         const country = findCountryByCoordinates(lat, lon);
