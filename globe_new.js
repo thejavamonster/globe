@@ -629,9 +629,9 @@ function createCountryOutline(country) {
                     color: layer.color,
                     transparent: true,
                     opacity: layer.opacity,
-                    depthTest: false,
-                    depthWrite: false,
-                    blending: THREE.AdditiveBlending
+                    depthTest: true,     // Enable depth testing to hide back-facing outlines
+                    depthWrite: true,    // Enable depth writing for proper occlusion
+                    blending: THREE.NormalBlending  // Use normal blending instead of additive
                 });
                 
                 const lineSegments = new THREE.LineSegments(layerGeometry, layerMaterial);
