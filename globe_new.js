@@ -594,6 +594,493 @@ function getWindDirection(degrees) {
     return directions[index];
 }
 
+// Helper function to get better search terms for each country
+function getCountrySearchTerms(countryName) {
+    const searchTerms = [countryName];
+    
+    // Add specific search terms for major countries to get more relevant results
+    const countrySpecificTerms = {
+        'Brazil': ['Brazil', 'Brazilian', 'Brasilia', 'Rio de Janeiro', 'São Paulo', 'Bolsonaro', 'Lula'],
+        'Mexico': ['Mexico', 'Mexican', 'Mexico City', 'AMLO', 'López Obrador', 'Guadalajara', 'Monterrey'],
+        'Australia': ['Australia', 'Australian', 'Sydney', 'Melbourne', 'Canberra', 'Albanese'],
+        'Germany': ['Germany', 'German', 'Berlin', 'Munich', 'Hamburg', 'Scholz'],
+        'France': ['France', 'French', 'Paris', 'Macron', 'Lyon', 'Marseille'],
+        'United Kingdom': ['UK', 'Britain', 'British', 'London', 'England', 'Scotland', 'Wales'],
+        'United States': ['USA', 'America', 'American', 'Washington', 'Biden', 'Trump'],
+        'Japan': ['Japan', 'Japanese', 'Tokyo', 'Osaka', 'Kyoto'],
+        'China': ['China', 'Chinese', 'Beijing', 'Shanghai', 'Xi Jinping'],
+        'India': ['India', 'Indian', 'Delhi', 'Mumbai', 'Modi'],
+        'Russia': ['Russia', 'Russian', 'Moscow', 'Putin', 'Kremlin'],
+        'Canada': ['Canada', 'Canadian', 'Ottawa', 'Toronto', 'Trudeau'],
+        'Italy': ['Italy', 'Italian', 'Rome', 'Milan', 'Vatican'],
+        'Spain': ['Spain', 'Spanish', 'Madrid', 'Barcelona', 'Sánchez']
+    };
+    
+    if (countrySpecificTerms[countryName]) {
+        return countrySpecificTerms[countryName];
+    }
+    
+    // For other countries, try to add the capital city and common variations
+    const capitals = {
+        'Netherlands': ['Netherlands', 'Dutch', 'Amsterdam', 'The Hague'],
+        'Sweden': ['Sweden', 'Swedish', 'Stockholm'],
+        'Norway': ['Norway', 'Norwegian', 'Oslo'],
+        'Denmark': ['Denmark', 'Danish', 'Copenhagen'],
+        'Finland': ['Finland', 'Finnish', 'Helsinki'],
+        'Poland': ['Poland', 'Polish', 'Warsaw'],
+        'Argentina': ['Argentina', 'Argentine', 'Buenos Aires'],
+        'Chile': ['Chile', 'Chilean', 'Santiago'],
+        'South Korea': ['Korea', 'Korean', 'Seoul', 'South Korea'],
+        'Thailand': ['Thailand', 'Thai', 'Bangkok'],
+        'Egypt': ['Egypt', 'Egyptian', 'Cairo'],
+        'Turkey': ['Turkey', 'Turkish', 'Ankara', 'Istanbul'],
+        'South Africa': ['South Africa', 'Cape Town', 'Johannesburg']
+    };
+    
+    return capitals[countryName] || [countryName];
+}
+
+// Helper function to get date X days ago in YYYY-MM-DD format
+function getDateDaysAgo(days) {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+    return date.toISOString().split('T')[0];
+}
+
+// Fetch news from WorldNewsAPI (better for location-based news)
+async function fetchFromWorldNewsAPI(country, apiKey) {
+    try {
+        // WorldNewsAPI has better geographical search capabilities
+        let searchQuery = country.name;
+        
+        // For better results, use both country name and major cities
+        const searchTerms = getCountrySearchTerms(country.name);
+        if (searchTerms.length > 1) {
+            // Use first few most relevant terms to avoid overly long queries
+            searchQuery = searchTerms.slice(0, 3).join(' OR ');
+        }
+        
+        // WorldNewsAPI endpoint with location-based search
+        const worldNewsUrl = `https://api.worldnewsapi.com/search-news?text=${encodeURIComponent(searchQuery)}&language=en&sort=publish-time&sort-direction=DESC&number=5&earliest-publish-date=${getDateDaysAgo(7)}&api-key=${apiKey}`;
+        
+        console.log('Fetching from WorldNewsAPI:', worldNewsUrl.replace(apiKey, 'API_KEY_HIDDEN'));
+        
+        const response = await fetch(worldNewsUrl);
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                throw new Error('Invalid WorldNewsAPI key');
+            } else if (response.status === 402) {
+                throw new Error('WorldNewsAPI quota exceeded');
+            } else if (response.status === 429) {
+                throw new Error('WorldNewsAPI rate limit exceeded');
+            } else {
+                throw new Error(`WorldNewsAPI error: ${response.status}`);
+            }
+        }
+        
+        const data = await response.json();
+        console.log('WorldNewsAPI response:', data);
+        
+        if (!data.news || data.news.length === 0) {
+            console.log('No articles found in WorldNewsAPI');
+            return false;
+        }
+        
+        // Filter for relevance - articles that actually mention the country
+        const relevantArticles = data.news.filter(article => {
+            const titleLower = (article.title || '').toLowerCase();
+            const textLower = (article.text || '').toLowerCase();
+            const contentText = titleLower + ' ' + textLower;
+            
+            // Check if article actually mentions the country or related terms
+            const searchTermsLower = getCountrySearchTerms(country.name).map(term => term.toLowerCase());
+            return searchTermsLower.some(term => 
+                contentText.includes(term) ||
+                contentText.includes(country.name.toLowerCase())
+            );
+        });
+        
+        console.log(`WorldNewsAPI: Found ${data.news.length} articles, ${relevantArticles.length} relevant`);
+        
+        if (relevantArticles.length === 0) {
+            return false;
+        }
+        
+        // Format articles for display
+        const newsItems = relevantArticles.slice(0, 3).map(article => ({
+            title: article.title,
+            summary: article.text ? (article.text.length > 150 ? article.text.substring(0, 150) + '...' : article.text) : 'No description available',
+            url: article.url,
+            source: article.source_country ? `${article.source_country} News` : 'WorldNews',
+            publishedAt: new Date(article.publish_time).toLocaleDateString()
+        }));
+        
+        displayRealNews(newsItems);
+        return true; // Success
+        
+    } catch (error) {
+        console.error('WorldNewsAPI failed:', error);
+        throw error; // Re-throw to trigger fallback
+    }
+}
+
+// Fetch news from UN News RSS feeds (regional, reliable, no CORS issues!)
+async function fetchNewsData(country) {
+    try {
+        // Set loading state
+        document.getElementById('news-status').innerHTML = '📰 Loading UN News...';
+        
+        console.log('Looking for news for country:', country.name);
+        
+        // Skip news for ocean/international waters
+        if (country.name === 'Ocean/International Waters') {
+            document.getElementById('news-status').innerHTML = '🌊 No news available for international waters';
+            return;
+        }
+        
+        // Country-specific RSS feeds (higher quality, more targeted news)
+        const countrySpecificFeeds = {
+            'France': 'https://www.france24.com/en/france/rss',
+            'United States': 'https://rss.nytimes.com/services/xml/rss/nyt/US.xml',
+            'United States of America': 'https://rss.nytimes.com/services/xml/rss/nyt/US.xml',
+            'USA': 'https://rss.nytimes.com/services/xml/rss/nyt/US.xml',
+            'US': 'https://rss.nytimes.com/services/xml/rss/nyt/US.xml',
+            'Australia': 'https://www.smh.com.au/rss/national.xml',
+            'United Kingdom': 'https://feeds.bbci.co.uk/news/uk/rss.xml',
+            'UK': 'https://feeds.bbci.co.uk/news/uk/rss.xml',
+            'Great Britain': 'https://feeds.bbci.co.uk/news/uk/rss.xml',
+            'Britain': 'https://feeds.bbci.co.uk/news/uk/rss.xml',
+            'India': 'https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms',
+            'Russia': 'https://www.rt.com/rss/russia/',
+            'Russian Federation': 'https://www.rt.com/rss/russia/',
+            'Uganda': 'https://www.watchdoguganda.com/feed',
+            'China': 'https://www.scmp.com/rss/4/feed/',
+            'Germany': 'https://www.spiegel.de/international/index.rss',
+            'Japan': 'https://www.japantimes.co.jp/feed/',
+            'Brazil': 'https://www.brasilwire.com/feed/',
+            'Mexico': 'https://mexiconewsdaily.com/feed/',
+            'Canada': 'https://www.cbc.ca/webfeed/rss/rss-canada',
+            'Egypt': 'https://www.dailynewsegypt.com/feed/',
+            'Argentina': 'https://www.batimes.com.ar/feed',
+            'Chile': 'https://feeds.bignewsnetwork.com/category/2df0da68a00f4413',
+            'South Korea': 'https://en.yna.co.kr/RSS/news.xml',
+            'Korea, Republic of': 'https://en.yna.co.kr/RSS/news.xml',
+            'Republic of Korea': 'https://en.yna.co.kr/RSS/news.xml',
+            'Poland': 'https://notesfrompoland.com/feed/',
+            'Saudi Arabia': 'https://saudigazette.com.sa/rssFeed/74',
+            'Kingdom of Saudi Arabia': 'https://saudigazette.com.sa/rssFeed/74',
+            'Iran': 'https://www.tehrantimes.com/rss',
+            'Iraq': 'https://www.iraq-businessnews.com/feed/',
+            'South Africa': 'https://mg.co.za/feed/',
+            'Republic of South Africa': 'https://mg.co.za/feed/',
+            'Malaysia': 'https://www.thestar.com.my/RSS/News/Nation/',
+            'New Zealand': 'https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/nz/?outputType=xml&_website=nzh',
+            'Venezuela': 'https://www.caracaschronicles.com/feed/',
+            'Nigeria': 'https://www.vanguardngr.com/feed/',
+            'Thailand': 'https://www.bangkokpost.com/rss/data/thailand.xml',
+            'Norway': 'https://www.regjeringen.no/en/rss/Rss/2581966/',
+            'Sweden': 'https://www.riksgalden.se/en/press-and-publications/press-releases-and-news/?feed=RSS',
+            'Finland': 'https://www.helsinkitimes.fi/?format=feed',
+            'Netherlands': 'https://feeds.government.nl/news.rss',
+            'Holland': 'https://feeds.government.nl/news.rss',
+            'Turkey': 'https://www.dailysabah.com/rss/turkiye',
+            'Türkiye': 'https://www.dailysabah.com/rss/turkiye'
+        };
+        
+        // Check for country-specific feed first
+        let rssUrl = countrySpecificFeeds[country.name];
+        let feedSource = 'Country-Specific';
+        
+        if (rssUrl) {
+            console.log(`Using country-specific RSS feed for ${country.name}:`, rssUrl);
+        } else {
+            // Fall back to UN News regional feeds
+            feedSource = 'UN News';
+            rssUrl = getUNRegionForCountry(country.name);
+            console.log(`Using UN News regional RSS feed for ${country.name}:`, rssUrl);
+        }
+        
+        // Map countries to UN News regional RSS feeds
+        function getUNRegionForCountry(countryName) {
+            const countryLower = countryName.toLowerCase();
+            
+            // Europe
+            if (['united kingdom', 'uk', 'great britain', 'britain', 'france', 'germany', 'italy', 'spain', 'netherlands', 'belgium', 'switzerland', 'austria', 'portugal', 'greece', 'ireland', 'denmark', 'sweden', 'norway', 'finland', 'iceland', 'russia', 'russian federation', 'ukraine', 'poland', 'czech republic', 'czechia', 'hungary', 'romania', 'bulgaria', 'croatia', 'serbia', 'bosnia and herzegovina', 'slovenia', 'slovakia', 'estonia', 'latvia', 'lithuania', 'belarus', 'moldova', 'albania', 'north macedonia', 'montenegro', 'kosovo', 'luxembourg', 'malta', 'cyprus', 'liechtenstein', 'monaco', 'san marino', 'vatican city'].some(country => countryLower.includes(country) || country.includes(countryLower))) {
+                return 'https://news.un.org/feed/subscribe/en/news/region/europe/feed/rss.xml';
+            }
+            
+            // Middle East (including North Africa per UN classification)
+            if (['turkey', 'iran', 'iraq', 'syria', 'lebanon', 'jordan', 'israel', 'palestine', 'saudi arabia', 'united arab emirates', 'uae', 'kuwait', 'qatar', 'bahrain', 'oman', 'yemen', 'egypt', 'libya', 'tunisia', 'algeria', 'morocco', 'western sahara'].some(country => countryLower.includes(country) || country.includes(countryLower))) {
+                return 'https://news.un.org/feed/subscribe/en/news/region/middle-east/feed/rss.xml';
+            }
+            
+            // Africa (Sub-Saharan)
+            if (['south africa', 'nigeria', 'kenya', 'ethiopia', 'ghana', 'uganda', 'tanzania', 'zimbabwe', 'zambia', 'botswana', 'namibia', 'madagascar', 'rwanda', 'senegal', 'mali', 'burkina faso', 'niger', 'chad', 'cameroon', 'angola', 'mozambique', 'somalia', 'sudan', 'south sudan', 'democratic republic of congo', 'congo', 'gabon', 'equatorial guinea', 'central african republic', 'benin', 'togo', 'ivory coast', 'liberia', 'sierra leone', 'guinea', 'guinea-bissau', 'gambia', 'mauritania', 'cape verde', 'sao tome and principe', 'comoros', 'seychelles', 'mauritius', 'djibouti', 'eritrea', 'burundi', 'malawi', 'lesotho', 'swaziland', 'eswatini'].some(country => countryLower.includes(country) || country.includes(countryLower))) {
+                return 'https://news.un.org/feed/subscribe/en/news/region/africa/feed/rss.xml';
+            }
+            
+            // Americas (North, Central, South America, and Caribbean)
+            if (['united states', 'usa', 'us', 'canada', 'mexico', 'brazil', 'argentina', 'chile', 'colombia', 'peru', 'venezuela', 'ecuador', 'bolivia', 'paraguay', 'uruguay', 'guatemala', 'honduras', 'el salvador', 'nicaragua', 'costa rica', 'panama', 'cuba', 'jamaica', 'haiti', 'dominican republic', 'puerto rico', 'trinidad and tobago', 'barbados', 'bahamas', 'belize', 'guyana', 'suriname', 'french guiana'].some(country => countryLower.includes(country) || country.includes(countryLower))) {
+                return 'https://news.un.org/feed/subscribe/en/news/region/americas/feed/rss.xml';
+            }
+            
+            // Asia Pacific (East Asia, South Asia, Southeast Asia, Central Asia, Oceania)
+            if (['china', 'japan', 'south korea', 'north korea', 'taiwan', 'hong kong', 'mongolia', 'thailand', 'vietnam', 'cambodia', 'laos', 'myanmar', 'burma', 'philippines', 'indonesia', 'malaysia', 'singapore', 'brunei', 'timor-leste', 'east timor', 'india', 'pakistan', 'bangladesh', 'sri lanka', 'nepal', 'bhutan', 'maldives', 'afghanistan', 'kazakhstan', 'uzbekistan', 'kyrgyzstan', 'tajikistan', 'turkmenistan', 'armenia', 'azerbaijan', 'georgia', 'australia', 'new zealand', 'papua new guinea', 'fiji', 'samoa', 'tonga', 'vanuatu', 'solomon islands', 'palau', 'micronesia', 'marshall islands', 'kiribati', 'tuvalu', 'nauru'].some(country => countryLower.includes(country) || country.includes(countryLower))) {
+                return 'https://news.un.org/feed/subscribe/en/news/region/asia-pacific/feed/rss.xml';
+            }
+            
+            // Default to Global feed for unmatched countries
+            return 'https://news.un.org/feed/subscribe/en/news/region/global/feed/rss.xml';
+        }
+        
+        // This section is now handled above in the country-specific check
+        
+        // Use CORS proxy to fetch UN News RSS feed
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(rssUrl)}`;
+        console.log('Fetching via CORS proxy:', proxyUrl);
+        
+        const response = await fetch(proxyUrl);
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch UN News RSS via proxy: ${response.status} ${response.statusText}`);
+        }
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch RSS: ${response.status} ${response.statusText}`);
+        }
+        
+        const xmlText = await response.text();
+        console.log('RSS XML received, length:', xmlText.length);
+        
+        // Parse XML using DOMParser
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+        
+        // Check for XML parsing errors
+        const parseError = xmlDoc.getElementsByTagName('parsererror');
+        if (parseError.length > 0) {
+            throw new Error('Failed to parse RSS XML');
+        }
+        
+        // Extract news items from XML
+        const items = xmlDoc.getElementsByTagName('item');
+        console.log('Found RSS items:', items.length);
+        
+        if (items.length === 0) {
+            throw new Error('No news items found in RSS feed');
+        }
+        
+        // Convert XML items to news format (take first 3)
+        const newsItems = [];
+        const itemsToProcess = Math.min(items.length, 3);
+        
+        for (let i = 0; i < itemsToProcess; i++) {
+            const item = items[i];
+            
+            // Extract text content from XML elements
+            const title = item.getElementsByTagName('title')[0]?.textContent || 'No title';
+            const link = item.getElementsByTagName('link')[0]?.textContent || '#';
+            const description = item.getElementsByTagName('description')[0]?.textContent || 'No description available';
+            const pubDate = item.getElementsByTagName('pubDate')[0]?.textContent || '';
+            
+            // Clean up description (remove HTML tags and entities)
+            const cleanDescription = description
+                .replace(/<[^>]*>/g, '')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .substring(0, 150);
+            
+            // Format date
+            let formattedDate = 'Recent';
+            if (pubDate) {
+                try {
+                    formattedDate = new Date(pubDate).toLocaleDateString();
+                } catch (e) {
+                    formattedDate = 'Recent';
+                }
+            }
+            
+            // Determine source name based on feed type
+            let sourceName = feedSource === 'Country-Specific' ? getSourceNameFromUrl(rssUrl) : 'UN News';
+            
+            newsItems.push({
+                title: title,
+                summary: cleanDescription,
+                url: link,
+                source: sourceName,
+                publishedAt: formattedDate
+            });
+        }
+        
+        console.log('Processed news items:', newsItems.length);
+        
+        displayRealNews(newsItems);
+        
+    } catch (error) {
+        console.error('News RSS fetch failed:', error);
+        
+        // Fallback to mock news if RSS fails
+        console.log('Falling back to mock news data');
+        const mockNews = generateMockNews(country.name);
+        displayNews(mockNews);
+        
+        // Show error message briefly
+        setTimeout(() => {
+            document.getElementById('news-status').innerHTML += 
+                '<div style="font-size: 10px; color: #666; margin-top: 8px; font-style: italic;">Using sample data - News RSS temporarily unavailable</div>';
+        }, 1000);
+    }
+}
+
+// Helper function to extract source name from RSS URL
+function getSourceNameFromUrl(url) {
+    const sourceMap = {
+        'france24.com': 'France 24',
+        'nytimes.com': 'NY Times',
+        'smh.com.au': 'Sydney Morning Herald',
+        'bbci.co.uk': 'BBC News',
+        'timesofindia.indiatimes.com': 'Times of India',
+        'rt.com': 'RT News',
+        'watchdoguganda.com': 'Watchdog Uganda',
+        'scmp.com': 'South China Morning Post',
+        'spiegel.de': 'Der Spiegel',
+        'japantimes.co.jp': 'Japan Times',
+        'brasilwire.com': 'Brasil Wire',
+        'mexiconewsdaily.com': 'Mexico News Daily',
+        'cbc.ca': 'CBC News',
+        'dailynewsegypt.com': 'Daily News Egypt',
+        'batimes.com.ar': 'Buenos Aires Times',
+        'bignewsnetwork.com': 'Big News Network',
+        'yna.co.kr': 'Yonhap News',
+        'notesfrompoland.com': 'Notes From Poland',
+        'saudigazette.com.sa': 'Saudi Gazette',
+        'tehrantimes.com': 'Tehran Times',
+        'iraq-businessnews.com': 'Iraq Business News',
+        'mg.co.za': 'Mail & Guardian',
+        'thestar.com.my': 'The Star Malaysia',
+        'nzherald.co.nz': 'NZ Herald',
+        'caracaschronicles.com': 'Caracas Chronicles',
+        'vanguardngr.com': 'Vanguard Nigeria',
+        'bangkokpost.com': 'Bangkok Post',
+        'regjeringen.no': 'Government Norway',
+        'riksgalden.se': 'Swedish National Debt Office',
+        'helsinkitimes.fi': 'Helsinki Times',
+        'government.nl': 'Government Netherlands',
+        'dailysabah.com': 'Daily Sabah'
+    };
+    
+    for (const [domain, name] of Object.entries(sourceMap)) {
+        if (url.includes(domain)) {
+            return name;
+        }
+    }
+    
+    return 'News Source';
+}
+
+// Generate representative mock news for demo purposes
+function generateMockNews(countryName) {
+    const newsTemplates = {
+        'United States': [
+            { title: 'Congress Passes New Infrastructure Bill', summary: 'Major investments in transportation and broadband announced.' },
+            { title: 'Tech Sector Shows Strong Growth', summary: 'Silicon Valley companies report record quarterly earnings.' },
+            { title: 'Climate Initiative Launched', summary: 'Federal program aims to reduce carbon emissions by 2030.' }
+        ],
+        'United Kingdom': [
+            { title: 'Parliament Debates New Housing Policy', summary: 'MPs discuss affordable housing initiatives across the UK.' },
+            { title: 'Royal Family Makes Public Appearance', summary: 'Charity event raises millions for local causes.' },
+            { title: 'Brexit Trade Relations Update', summary: 'New agreements signed with European partners.' }
+        ],
+        'Germany': [
+            { title: 'Renewable Energy Milestone Reached', summary: 'Wind and solar power hit new generation records.' },
+            { title: 'Automotive Industry Innovation', summary: 'German carmakers unveil new electric vehicle models.' },
+            { title: 'European Union Summit Begins', summary: 'Leaders gather in Berlin for economic discussions.' }
+        ],
+        'France': [
+            { title: 'Cultural Festival Draws Millions', summary: 'Paris hosts international arts and music celebration.' },
+            { title: 'Agricultural Sector Modernization', summary: 'New technology initiatives support French farmers.' },
+            { title: 'Space Program Achievements', summary: 'ESA mission launches successfully from French Guiana.' }
+        ],
+        'Japan': [
+            { title: 'Technology Innovation Showcase', summary: 'Tokyo exhibition features latest robotics advances.' },
+            { title: 'Sustainable Tourism Initiative', summary: 'New programs promote eco-friendly travel options.' },
+            { title: 'Cherry Blossom Festival Updates', summary: 'Record visitors expected for this years hanami season.' }
+        ],
+        'China': [
+            { title: 'Economic Growth Targets Announced', summary: 'Government outlines development plans for next quarter.' },
+            { title: 'High-Speed Rail Expansion', summary: 'New connections link major cities across the country.' },
+            { title: 'Environmental Protection Measures', summary: 'New policies address air quality and conservation.' }
+        ],
+        'default': [
+            { title: `${countryName} Economic Update`, summary: 'Local markets show positive growth trends this quarter.' },
+            { title: `Cultural Events in ${countryName}`, summary: 'Traditional festivals and modern celebrations planned.' },
+            { title: `${countryName} International Relations`, summary: 'Diplomatic ties strengthened with neighboring countries.' }
+        ]
+    };
+    
+    return newsTemplates[countryName] || newsTemplates['default'];
+}
+
+// Display real news from NewsAPI with enhanced formatting
+function displayRealNews(newsItems) {
+    let newsHtml = '';
+    
+    newsItems.forEach((item, index) => {
+        // Truncate long titles and summaries
+        const maxTitleLength = 60;
+        const maxSummaryLength = 120;
+        
+        const truncatedTitle = item.title.length > maxTitleLength 
+            ? item.title.substring(0, maxTitleLength) + '...' 
+            : item.title;
+            
+        const truncatedSummary = item.summary.length > maxSummaryLength 
+            ? item.summary.substring(0, maxSummaryLength) + '...' 
+            : item.summary;
+        
+        newsHtml += `
+            <div style="margin-bottom: ${index < newsItems.length - 1 ? '12px' : '0'}; padding-bottom: ${index < newsItems.length - 1 ? '10px' : '0'}; ${index < newsItems.length - 1 ? 'border-bottom: 1px solid rgba(68, 136, 255, 0.2);' : ''}">
+                <div style="font-weight: bold; font-size: 13px; color: #4488ff; margin-bottom: 4px; cursor: pointer;" onclick="window.open('${item.url}', '_blank')" title="Click to read full article">
+                    📰 ${truncatedTitle}
+                </div>
+                <div style="font-size: 11px; color: #aaa; line-height: 1.3; margin-bottom: 4px;">
+                    ${truncatedSummary}
+                </div>
+                <div style="font-size: 9px; color: #666; display: flex; justify-content: space-between;">
+                    <span>📅 ${item.publishedAt}</span>
+                    <span>🏢 ${item.source}</span>
+                </div>
+            </div>
+        `;
+    });
+    
+    document.getElementById('news-status').innerHTML = newsHtml;
+}
+
+// Display news in the sidebar (fallback for mock data)
+function displayNews(newsItems) {
+    let newsHtml = '';
+    
+    newsItems.forEach((item, index) => {
+        newsHtml += `
+            <div style="margin-bottom: ${index < newsItems.length - 1 ? '12px' : '0'}; padding-bottom: ${index < newsItems.length - 1 ? '8px' : '0'}; ${index < newsItems.length - 1 ? 'border-bottom: 1px solid rgba(68, 136, 255, 0.2);' : ''}">
+                <div style="font-weight: bold; font-size: 13px; color: #4488ff; margin-bottom: 4px;">
+                    📰 ${item.title}
+                </div>
+                <div style="font-size: 11px; color: #aaa; line-height: 1.3;">
+                    ${item.summary}
+                </div>
+            </div>
+        `;
+    });
+    
+    document.getElementById('news-status').innerHTML = newsHtml;
+}
+
 function updateSidebar(country, clickLat, clickLng, debug = null) {
     document.getElementById('country-name').textContent = country.name;
     
@@ -677,9 +1164,13 @@ function updateSidebar(country, clickLat, clickLng, debug = null) {
     
     // Set initial weather status
     document.getElementById('weather-status').textContent = 'Loading weather...';
+    document.getElementById('news-status').textContent = 'Loading news...';
     
     // Fetch weather data from Open-Meteo
     fetchWeatherData(clickLat, clickLng, isDaytime);
+    
+    // Fetch news data for the country
+    fetchNewsData(country);
         
     console.log('Time calculated:', timeInfo); // Debug
 }
