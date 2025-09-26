@@ -512,6 +512,88 @@ function latLonToVector3(lat, lon, radius = 5) {
     return result;
 }
 
+// Fetch weather data from Open-Meteo API
+async function fetchWeatherData(lat, lng, isDaytime) {
+    try {
+        // Open-Meteo current weather API
+        const response = await fetch(
+            `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m&timezone=auto`
+        );
+        
+        if (!response.ok) {
+            throw new Error(`Weather API response: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Weather data:', data);
+        
+        const current = data.current;
+        
+        // Weather code interpretation (WMO Weather interpretation codes)
+        const weatherCodes = {
+            0: '☀️ Clear sky',
+            1: '🌤️ Mainly clear',
+            2: '⛅ Partly cloudy',
+            3: '☁️ Overcast',
+            45: '🌫️ Fog',
+            48: '🌫️ Depositing rime fog',
+            51: '🌦️ Light drizzle',
+            53: '🌦️ Moderate drizzle',
+            55: '🌦️ Dense drizzle',
+            61: '🌧️ Light rain',
+            63: '🌧️ Moderate rain',
+            65: '🌧️ Heavy rain',
+            71: '🌨️ Light snow',
+            73: '🌨️ Moderate snow',
+            75: '❄️ Heavy snow',
+            77: '🌨️ Snow grains',
+            80: '🌦️ Light rain showers',
+            81: '🌧️ Moderate rain showers',
+            82: '⛈️ Violent rain showers',
+            85: '🌨️ Light snow showers',
+            86: '❄️ Heavy snow showers',
+            95: '⛈️ Thunderstorm',
+            96: '⛈️ Thunderstorm with hail',
+            99: '⛈️ Thunderstorm with heavy hail'
+        };
+        
+        const weatherDescription = weatherCodes[current.weather_code] || `☁️ Weather code ${current.weather_code}`;
+        const temp = Math.round(current.temperature_2m);
+        const feelsLike = Math.round(current.apparent_temperature);
+        const humidity = current.relative_humidity_2m;
+        const windSpeed = Math.round(current.wind_speed_10m);
+        const windDir = getWindDirection(current.wind_direction_10m);
+        
+        // Create weather display
+        const weatherHtml = `
+            <div style="margin-bottom: 8px;">
+                <strong>${weatherDescription}</strong>
+            </div>
+            <div style="font-size: 14px; color: #ccc; line-height: 1.4;">
+                🌡️ ${temp}°C (feels like ${feelsLike}°C)<br>
+                💨 ${windSpeed} km/h ${windDir}<br>
+                💧 ${humidity}% humidity
+            </div>
+        `;
+        
+        document.getElementById('weather-status').innerHTML = weatherHtml;
+        
+    } catch (error) {
+        console.error('Weather fetch failed:', error);
+        
+        // Fallback to basic day/night status
+        const basicStatus = isDaytime ? '☀️ Daytime' : '🌙 Nighttime';
+        document.getElementById('weather-status').textContent = basicStatus;
+    }
+}
+
+// Helper function to convert wind direction degrees to compass direction
+function getWindDirection(degrees) {
+    const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    const index = Math.round(degrees / 22.5) % 16;
+    return directions[index];
+}
+
 function updateSidebar(country, clickLat, clickLng, debug = null) {
     document.getElementById('country-name').textContent = country.name;
     
@@ -591,6 +673,13 @@ function updateSidebar(country, clickLat, clickLng, debug = null) {
     const timeInfo = getLocalTimeFromLatLng(clickLat, clickLng);
     document.getElementById('local-time').textContent = timeInfo.timeString;
     
+    const isDaytime = timeInfo.hour24 >= 6 && timeInfo.hour24 < 18;
+    
+    // Set initial weather status
+    document.getElementById('weather-status').textContent = 'Loading weather...';
+    
+    // Fetch weather data from Open-Meteo
+    fetchWeatherData(clickLat, clickLng, isDaytime);
         
     console.log('Time calculated:', timeInfo); // Debug
 }
