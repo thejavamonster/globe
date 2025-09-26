@@ -113,13 +113,8 @@
   <script type="module" src="globe_new.js"></script>
   
   <script>
-    function closeSidebar() {
-      document.getElementById('sidebar').classList.remove('open');
-      console.log('Sidebar closed');
-    }
-    
-    // Make globally accessible
-    window.closeSidebar = closeSidebar;
+    // closeSidebar function is now defined in globe_new.js
+    // This ensures the outline is cleared when the sidebar is closed
     
     function testSidebar() {
       console.log('Testing sidebar...');

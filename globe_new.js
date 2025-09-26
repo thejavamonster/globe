@@ -148,6 +148,7 @@ const markerGeometry = new THREE.SphereGeometry(0.05, 16, 16);
 const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 const clickMarker = new THREE.Mesh(markerGeometry, markerMaterial);
 clickMarker.visible = false;
+clickMarker.raycast = () => {}; // Disable raycasting on click marker
 scene.add(clickMarker);
 
 // Add atmospheric glow - High resolution
@@ -161,7 +162,11 @@ const atmosphereMaterial = new THREE.MeshPhongMaterial({
     emissiveIntensity: 0.2
 });
 const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+atmosphere.raycast = () => {}; // Disable raycasting on atmosphere
 scene.add(atmosphere);
+
+// Country outline object for highlighting selected countries
+let countryOutline = null;
 
 // Minimal lighting (no directional sun light)
 const ambientLight = new THREE.AmbientLight(0x404040, 0.3); // Very low ambient
@@ -251,19 +256,45 @@ function onMouseClick(event) {
     console.log('Mouse coordinates:', mouse.x, mouse.y); // Debug
     
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObject(globe);
     
-    console.log('Intersects found:', intersects.length); // Debug
+    // Only intersect with the globe mesh, not outline or other objects
+    // Use recursive=false to avoid hitting child objects (like the outline)
+    const intersects = raycaster.intersectObject(globe, false);
+    
+    console.log('Globe intersects found:', intersects.length); // Debug
     
     if (intersects.length > 0) {
-        const intersection = intersects[0];
-        const point = intersection.point;
-        console.log('Intersection point:', point);
+        // Get the first valid intersection with the globe surface
+        let intersection = intersects[0];
         
-        // DEBUG: Try multiple coordinate conversion mssethods
-        const uv = intersection.uv;
+        // Validate intersection point is reasonable (within expected distance from origin)
+        const distance = intersection.point.length();
+        if (distance < 4.8 || distance > 5.2) { // Globe radius is 5, allow some margin
+            console.warn('Intersection distance seems wrong:', distance, 'trying next intersection');
+            if (intersects.length > 1) {
+                intersection = intersects[1]; // Try second intersection
+            }
+        }
+        
+        const point = intersection.point;
+        console.log('Using intersection point:', point, 'distance:', point.length().toFixed(3));
+        
+        // DEBUG: Try multiple coordinate conversion methods
+        let uv = intersection.uv;
         const point3D = intersection.point;
         const normalized = point3D.clone().normalize();
+        
+        // Fallback UV calculation if not provided
+        if (!uv) {
+            // Calculate UV from 3D coordinates
+            const lon = Math.atan2(-normalized.z, normalized.x);
+            const lat = Math.asin(normalized.y);
+            uv = {
+                x: (lon / (2 * Math.PI)) + 0.5, // Convert -π,π to 0,1
+                y: 0.5 - (lat / Math.PI) // Convert -π/2,π/2 to 1,0
+            };
+            console.log('UV not provided, calculated fallback:', uv);
+        }
         
         console.log('=== DEBUGGING COORDINATES ===');
         console.log('3D intersection point:', point3D);
@@ -304,6 +335,9 @@ function onMouseClick(event) {
         console.log('Found country:', country);
         console.log('=============================');
         
+        // Create outline for the selected country
+        createCountryOutline(country);
+        
         updateSidebar(country, lat, lon, {
             uv: uv,
             methods: {
@@ -339,6 +373,7 @@ function findCountryByCoordinates(lat, lon) {
         return {
             name: country.properties.NAME || country.properties.name || 'Unknown Country',
             properties: country.properties,
+            geometry: country.geometry, // Include geometry for outline creation!
             lat: lat,
             lon: lon
         };
@@ -350,6 +385,131 @@ function findCountryByCoordinates(lat, lon) {
         lat: lat,
         lon: lon
     };
+}
+
+// Function to create country outline
+function createCountryOutline(country) {
+    console.log('Creating outline for country:', country.name);
+    
+    // Remove existing outline
+    if (countryOutline) {
+        globe.remove(countryOutline);
+        
+        // Clean up group contents
+        if (countryOutline.children) {
+            countryOutline.children.forEach(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+        }
+        
+        countryOutline = null;
+        console.log('Removed previous outline');
+    }
+    
+    if (!country || !country.geometry || country.name === 'Ocean/International Waters') {
+        console.log('No valid country for outline');
+        return;
+    }
+    
+    console.log('Country geometry type:', country.geometry.type);
+    
+    // Store original coordinates for multiple layer processing
+    let allCoordinates = [];
+    
+    // Process country geometry to get coordinates
+    if (country.geometry.type === 'Polygon') {
+        allCoordinates = country.geometry.coordinates;
+    } else if (country.geometry.type === 'MultiPolygon') {
+        allCoordinates = country.geometry.coordinates.flat(); // Flatten all polygons
+    }
+    
+    console.log('Processing', allCoordinates.length, 'coordinate sets');
+    
+    if (allCoordinates.length > 0) {
+        // Create outline using multiple overlapping lines for thickness
+        countryOutline = new THREE.Group();
+        
+        // Create multiple line layers for thickness effect
+        const layers = [
+            { radius: 5.08, color: 0x00ff88, opacity: 0.4 }, // Inner glow
+            { radius: 5.09, color: 0x00ff88, opacity: 0.6 }, // Medium inner
+            { radius: 5.10, color: 0x00ff88, opacity: 1.0 }, // Main line
+            { radius: 5.11, color: 0x00ff88, opacity: 0.6 }, // Medium outer  
+            { radius: 5.12, color: 0x00ff88, opacity: 0.4 }  // Outer glow
+        ];
+        
+        layers.forEach(layer => {
+            // Calculate vertices at this radius
+            const layerVertices = [];
+            
+            allCoordinates.forEach(ring => {
+                if (Array.isArray(ring) && ring.length > 0) {
+                    for (let i = 0; i < ring.length - 1; i++) {
+                        const [lon1, lat1] = ring[i];
+                        const [lon2, lat2] = ring[i + 1];
+                        
+                        if (!isNaN(lat1) && !isNaN(lon1) && !isNaN(lat2) && !isNaN(lon2)) {
+                            const pos1 = latLonToVector3(lat1, lon1, layer.radius);
+                            const pos2 = latLonToVector3(lat2, lon2, layer.radius);
+                            
+                            layerVertices.push(pos1.x, pos1.y, pos1.z);
+                            layerVertices.push(pos2.x, pos2.y, pos2.z);
+                        }
+                    }
+                }
+            });
+            
+            if (layerVertices.length > 0) {
+                const layerGeometry = new THREE.BufferGeometry();
+                layerGeometry.setAttribute('position', new THREE.Float32BufferAttribute(layerVertices, 3));
+                
+                const layerMaterial = new THREE.LineBasicMaterial({
+                    color: layer.color,
+                    transparent: true,
+                    opacity: layer.opacity,
+                    depthTest: false,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending
+                });
+                
+                const lineSegments = new THREE.LineSegments(layerGeometry, layerMaterial);
+                
+                // Make outline non-interactive for raycasting
+                lineSegments.raycast = () => {}; // Disable raycasting on outline
+                
+                countryOutline.add(lineSegments);
+            }
+        });
+        
+        console.log('Created thick outline with', layers.length, 'layers');
+        globe.add(countryOutline);
+        console.log('Added outline to globe');
+    } else {
+        console.log('No vertices generated for outline');
+    }
+}
+
+// Removed addPolygonVertices function - now using direct coordinate processing for multi-layer outlines
+
+// Helper function to convert lat/lng to 3D vector
+// This MUST match the coordinate system used in Method 3 click detection!
+function latLonToVector3(lat, lon, radius = 5) {
+    const latRad = (lat * Math.PI) / 180;
+    const lonRad = (lon * Math.PI) / 180;
+    
+    // Match Method 3: lon3 = Math.atan2(-normalized.z, normalized.x)
+    // This means: x = cos(lat) * cos(lon), y = sin(lat), z = -cos(lat) * sin(lon)
+    const x = radius * Math.cos(latRad) * Math.cos(lonRad);
+    const y = radius * Math.sin(latRad);
+    const z = -radius * Math.cos(latRad) * Math.sin(lonRad); // Negative Z to match Method 3
+    
+    const result = new THREE.Vector3(x, y, z);
+    
+    // Minimal debug logging (remove this line to disable completely)
+    // console.log('Coord conversion:', lat.toFixed(2), lon.toFixed(2), '→', result.x.toFixed(2), result.y.toFixed(2), result.z.toFixed(2));
+    
+    return result;
 }
 
 function updateSidebar(country, clickLat, clickLng, debug = null) {
@@ -431,9 +591,6 @@ function updateSidebar(country, clickLat, clickLng, debug = null) {
     const timeInfo = getLocalTimeFromLatLng(clickLat, clickLng);
     document.getElementById('local-time').textContent = timeInfo.timeString;
     
-    const isDaytime = timeInfo.hour24 >= 6 && timeInfo.hour24 < 18;
-    document.getElementById('daynight-status').textContent = 
-        isDaytime ? '☀️ Daytime' : '🌙 Nighttime';
         
     console.log('Time calculated:', timeInfo); // Debug
 }
@@ -448,8 +605,37 @@ function openSidebar() {
     }
 }
 
+function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+        sidebar.classList.remove('open');
+        console.log('Sidebar closed'); // Debug
+    }
+    
+    // Clear country outline when closing sidebar
+    if (countryOutline) {
+        globe.remove(countryOutline);
+        
+        // Clean up group contents
+        if (countryOutline.children) {
+            countryOutline.children.forEach(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+        }
+        
+        countryOutline = null;
+    }
+    
+    // Hide click marker as well
+    if (clickMarker) {
+        clickMarker.visible = false;
+    }
+}
+
 // Make functions globally accessible
 window.openSidebar = openSidebar;
+window.closeSidebar = closeSidebar;
 
 window.addEventListener('mousedown', onMouseDown);
 window.addEventListener('mousemove', onMouseMove);
