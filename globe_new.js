@@ -571,7 +571,7 @@ async function fetchWeatherData(lat, lng, isDaytime) {
             </div>
             <div style="font-size: 14px; color: #ccc; line-height: 1.4;">
                 🌡️ ${temp}°C (feels like ${feelsLike}°C)<br>
-                💨 ${windSpeed} km/h ${windDir}<br>
+                🍃 ${windSpeed} km/h ${windDir}<br>
                 💧 ${humidity}% humidity
             </div>
         `;
